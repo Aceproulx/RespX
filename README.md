@@ -37,6 +37,10 @@ It automatically names output files based on the request URL and formats HTTP he
 ```bash
 ./respx_commented.sh selectedItems.xml
 ```
+**Save outputs to the same directory as the input file:**
+```bash
+./respx_commented.sh selectedItems.xml .
+```
 
 **Custom output directory:**
 ```bash
