@@ -5,7 +5,12 @@ RespX is a simple CLI tool that extracts Base64-encoded HTTP responses from Burp
 It automatically names output files based on the request URL and formats HTTP headers as comments depending on file type.
 
 ---
-
+# How to export files in Burp Suite
+- Go to the Logger tab
+- Select the requests which you would like to export the responses
+- Right click then click "Save items"
+- Give it a name then click on "Save"
+-  To turn the exported file to files like js files, html files for some sort of analysis use respx
 ## Features
 
 - Extracts Base64 responses from Burp Suite XML export files
