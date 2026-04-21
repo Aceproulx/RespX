@@ -6,7 +6,7 @@ It automatically names output files based on the request URL and formats HTTP he
 
 ---
 # How to export files in Burp Suite
-- Go to the Logger tab
+- Go to the Logger tab or the Sitemap under the Target tab
 - Select the requests which you would like to export the responses
 - Right click then click "Save items"
 - Give it a name then click on "Save"
