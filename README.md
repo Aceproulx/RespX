@@ -7,10 +7,10 @@ It automatically names output files based on the request URL and formats HTTP he
 ---
 # How to export files in Burp Suite
 - Go to the Logger tab or the Sitemap under the Target tab
-- Select the requests which you would like to export the responses
-- Right click then click "Save items"
-- Give it a name then click on "Save"
--  To turn the exported file to files like js files, html files for some sort of analysis use respx
+- Select the requests/URLs whose responses you want to export
+- Right-click and select "Save items"
+- Give it a name and click "Save"
+- To extract responses from the exported XML into individual files (JS, HTML, etc.) for analysis, use respx
 ## Features
 
 - Extracts Base64 responses from Burp Suite XML export files
