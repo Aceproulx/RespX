@@ -14,7 +14,7 @@ DISABLE_HASH=0
 
 # Parse arguments
 FILE=""
-OUTDIR="."
+OUTDIR="respx-output"
 
 for arg in "$@"; do
     case "$arg" in
