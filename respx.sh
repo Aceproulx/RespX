@@ -1,18 +1,57 @@
 #!/bin/bash
 
 # RespX — Extract + decode + comment Burp XML responses (multi-item support)
-# Usage: ./respx.sh <burp_export.xml> [output_dir]
+# Usage: ./respx.sh <burp_export.xml> [output_dir] [--with-params] [--no-hash]
+#
+# Options:
+#   --with-params    Include URL query parameters in filenames
+#                    (default: strip params, e.g. "challenge?foo=bar" → "challenge")
+#   --no-hash        Don't append MD5 hash to duplicate filenames
+#                    (default: append hash for duplicates, e.g. "challenge_HASH")
 
-if [ -z "$1" ]; then
-    echo "Usage: $0 <burp_export.xml> [output_dir]"
+INCLUDE_PARAMS=0
+DISABLE_HASH=0
+
+# Parse arguments
+FILE=""
+OUTDIR="."
+
+for arg in "$@"; do
+    case "$arg" in
+        --with-params)
+            INCLUDE_PARAMS=1
+            ;;
+        --no-hash)
+            DISABLE_HASH=1
+            ;;
+        -*)
+            echo "Unknown option: $arg"
+            exit 1
+            ;;
+        *)
+            if [ -z "$FILE" ]; then
+                FILE="$arg"
+            else
+                OUTDIR="$arg"
+            fi
+            ;;
+    esac
+done
+
+if [ -z "$FILE" ]; then
+    echo "Usage: $0 <burp_export.xml> [output_dir] [--with-params] [--no-hash]"
+    echo ""
+    echo "Options:"
+    echo "  --with-params    Include URL query parameters in filenames"
+    echo "  --no-hash        Don't append MD5 hash to duplicate filenames"
     exit 1
 fi
 
-FILE="$1"
-OUTDIR="${2:-.}"
-
 mkdir -p "$OUTDIR"
 [ ! -f "$FILE" ] && echo "Error: File not found: $FILE" && exit 1
+
+# Track seen filenames to handle duplicates
+declare -A SEEN_FILES
 
 # Find all <item> start lines and process each
 grep -n "<item>" "$FILE" | cut -d: -f1 | while read START_LINE; do
@@ -31,6 +70,12 @@ grep -n "<item>" "$FILE" | cut -d: -f1 | while read START_LINE; do
     
     # Get filename from URL
     FILENAME=$(basename "$URL")
+    
+    # Strip query parameters by default (unless --with-params flag is set)
+    if [ "$INCLUDE_PARAMS" -eq 0 ]; then
+        FILENAME="${FILENAME%%\?*}"  # Remove everything from ? onwards
+    fi
+    
     [ -z "$FILENAME" ] && FILENAME="response"
     
     # Extract & decode response
@@ -68,6 +113,23 @@ grep -n "<item>" "$FILE" | cut -d: -f1 | while read START_LINE; do
     
     OUTFILE="$OUTDIR/$FILENAME"
     
+    # Check for duplicate filenames and add MD5 hash if needed (unless --no-hash is set)
+    if [ "$DISABLE_HASH" -eq 0 ] && [ -f "$OUTFILE" ]; then
+        # Calculate MD5 hash of the body content (first 16 chars)
+        CONTENT_HASH=$(echo "$BODY" | md5sum | awk '{print $1}' | cut -c1-16)
+        
+        # Insert hash before file extension (if any)
+        if [[ "$FILENAME" =~ \. ]]; then
+            # Has extension: challenge.js → challenge_HASH.js
+            FILENAME_BASE="${FILENAME%.*}"
+            FILENAME_EXT=".${FILENAME##*.}"
+            OUTFILE="$OUTDIR/${FILENAME_BASE}_${CONTENT_HASH}${FILENAME_EXT}"
+        else
+            # No extension: challenge → challenge_HASH
+            OUTFILE="$OUTDIR/${FILENAME}_${CONTENT_HASH}"
+        fi
+    fi
+    
     # Write output: comment ONLY headers, body is raw
     {
         # Opening comment tag (if wrapping style)
@@ -94,7 +156,9 @@ grep -n "<item>" "$FILE" | cut -d: -f1 | while read START_LINE; do
         [ -n "$BODY" ] && printf '%s\n' "$BODY"
     } > "$OUTFILE"
     
-    echo "✓ $FILENAME"
+    # Display the actual final filename (may include hash)
+    FINAL_FILENAME=$(basename "$OUTFILE")
+    echo "✓ $FINAL_FILENAME"
 done
 
 echo ""
