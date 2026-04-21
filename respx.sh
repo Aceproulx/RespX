@@ -1,69 +1,103 @@
 #!/bin/bash
 
-# Usage:
-#   ./extract_and_save_with_comments.sh file_name
+# RespX — Extract + decode + comment Burp XML responses (multi-item support)
+# Usage: ./respx.sh <burp_export.xml> [output_dir]
 
 if [ -z "$1" ]; then
-    echo "Usage: $0 <file>"
+    echo "Usage: $0 <burp_export.xml> [output_dir]"
     exit 1
 fi
 
 FILE="$1"
+OUTDIR="${2:-.}"
 
-# 1. Extract URL
-URL=$(grep -Po '(?<=<url><!\[CDATA\[).*?(?=\]\]></url>)' "$FILE")
+mkdir -p "$OUTDIR"
+[ ! -f "$FILE" ] && echo "Error: File not found: $FILE" && exit 1
 
-# 2. Get basename
-BASENAME=$(basename "$URL")
+# Find all <item> start lines and process each
+grep -n "<item>" "$FILE" | cut -d: -f1 | while read START_LINE; do
+    # Find the closing </item> for THIS item
+    CLOSE_LINE=$(sed -n "${START_LINE},\$p" "$FILE" | grep -n '</item>' | head -1 | cut -d: -f1)
+    [ -z "$CLOSE_LINE" ] && continue
+    CLOSE_LINE=$((START_LINE + CLOSE_LINE - 1))
+    
+    # Extract this item block only
+    ITEM=$(sed -n "${START_LINE},${CLOSE_LINE}p" "$FILE")
+    [ -z "$ITEM" ] && continue
+    
+    # Extract URL
+    URL=$(echo "$ITEM" | grep -oP '(?<=<url><!\[CDATA\[).*?(?=\]\]></url>)')
+    [ -z "$URL" ] && continue
+    
+    # Get filename from URL
+    FILENAME=$(basename "$URL")
+    [ -z "$FILENAME" ] && FILENAME="response"
+    
+    # Extract & decode response
+    ENCODED=$(echo "$ITEM" | grep -oP '(?<=<response base64="true"><!\[CDATA\[).*?(?=\]\]></response>)')
+    [ -z "$ENCODED" ] && continue
+    
+    DECODED=$(echo "$ENCODED" | base64 -d 2>/dev/null)
+    [ $? -ne 0 ] && continue
+    
+    # Split headers from body on blank line (\r\n\r\n or \n\n)
+    # Remove \r chars first, then split on blank line
+    DECODED_CLEAN=$(echo "$DECODED" | tr -d '\r')
+    HEADERS=$(printf '%s\n' "$DECODED_CLEAN" | awk '/^$/{exit} {print}')
+    BODY=$(printf '%s\n' "$DECODED_CLEAN" | awk '/^$/{flag=1; next} flag {print}')
+    
+    # Determine comment style by file extension
+    case "$FILENAME" in
+        *.js)
+            COMMENT_PREFIX="//"
+            WRAP_OPEN=""
+            WRAP_CLOSE=""
+            ;;
+        *.html|*.htm)
+            COMMENT_PREFIX=""
+            WRAP_OPEN="<!--"
+            WRAP_CLOSE="-->"
+            ;;
+        *)
+            # No extension or other types → HTML comment style
+            COMMENT_PREFIX=""
+            WRAP_OPEN="<!--"
+            WRAP_CLOSE="-->"
+            ;;
+    esac
+    
+    OUTFILE="$OUTDIR/$FILENAME"
+    
+    # Write output: comment ONLY headers, body is raw
+    {
+        # Opening comment tag (if wrapping style)
+        [ -n "$WRAP_OPEN" ] && echo "$WRAP_OPEN"
+        
+        # Comment each HEADER line only
+        while IFS= read -r line; do
+            if [ -n "$COMMENT_PREFIX" ]; then
+                # For .js: prefix headers with //
+                echo "$COMMENT_PREFIX $line"
+            else
+                # For HTML/no-ext: just output headers (wrapped in <!-- -->)
+                echo "$line"
+            fi
+        done <<< "$HEADERS"
+        
+        # Closing comment tag (if wrapping style)
+        [ -n "$WRAP_CLOSE" ] && echo "$WRAP_CLOSE"
+        
+        # Blank line separator between headers and body
+        echo ""
+        
+        # Body content - output AS-IS, NO comments
+        [ -n "$BODY" ] && printf '%s\n' "$BODY"
+    } > "$OUTFILE"
+    
+    echo "✓ $FILENAME"
+done
 
-# fallback
-[ -z "$BASENAME" ] && BASENAME="output"
-
-OUTFILE="$BASENAME"
-
-# 3. Extract + decode response
-RAW=$(grep -Po '(?<=<response base64="true"><!\[CDATA\[).*?(?=\]\]></response>)' "$FILE" | base64 -d)
-
-# 4. Split headers + body
-HEADERS=$(echo "$RAW" | sed '/^\r$/q')
-BODY=$(echo "$RAW" | sed '1,/^\r$/d')
-
-# fallback if \r isn't detected
-if [ -z "$BODY" ]; then
-    HEADERS=$(echo "$RAW" | sed '/^$/q')
-    BODY=$(echo "$RAW" | sed '1,/^$/d')
-fi
-
-# 5. Decide comment style
-if [[ "$OUTFILE" == *.js ]]; then
-    COMMENT_PREFIX="// "
-    COMMENT_WRAP_START=""
-    COMMENT_WRAP_END=""
-elif [[ "$OUTFILE" == *.html ]] || [[ "$OUTFILE" != *.* ]]; then
-    COMMENT_PREFIX=""
-    COMMENT_WRAP_START="<!--"
-    COMMENT_WRAP_END="-->"
-else
-    COMMENT_PREFIX="# "
-    COMMENT_WRAP_START=""
-    COMMENT_WRAP_END=""
-fi
-
-# 6. Write output
-{
-    if [ -n "$COMMENT_WRAP_START" ]; then
-        echo "$COMMENT_WRAP_START"
-    fi
-
-    while IFS= read -r line; do
-        echo "${COMMENT_PREFIX}${line}"
-    done <<< "$HEADERS"
-
-    if [ -n "$COMMENT_WRAP_END" ]; then
-        echo "$COMMENT_WRAP_END"
-    fi
-
-    echo "$BODY"
-} > "$OUTFILE"
-
-echo "Saved response as: $OUTFILE"
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+OUTFILES=$(ls -1 "$OUTDIR" 2>/dev/null | wc -l)
+echo "Extracted $OUTFILES files → $OUTDIR/"
